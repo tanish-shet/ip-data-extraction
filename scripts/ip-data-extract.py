@@ -34,7 +34,7 @@ def parse_lib_gz(input_file, output_csv):
     re_mode = re.compile(r'mode\s*\(.*?,\s*"([^"]+)"\)', re.IGNORECASE)
     re_sigma_type = re.compile(r'sigma_type\s*:\s*"?([^";\s]+)"?\s*;', re.IGNORECASE)
 
-    req_types = ["setup_rising", "setup_falling", "hold_rising", "hold_falling", "combinational"]
+    req_types = ["setup_rising", "setup_falling", "hold_rising", "hold_falling", "combinational", "rising_edge", "falling_edge"]
     
     # Base tables and OCV tables
     base_tables = ["cell_rise", "rise_transition", "cell_fall", "fall_transition", "rise_constraint", "fall_constraint"]
@@ -49,7 +49,7 @@ def parse_lib_gz(input_file, output_csv):
     with open(output_csv, 'w', newline='') as f_csv:
         writer = csv.writer(f_csv)
   
-        writer.writerow(["pin", "related_pin", "mode", "setup", "hold", "comb_setup", "comb_hold"])
+        writer.writerow(["pin", "related_pin", "mode", "setup", "hold", "comb_setup", "comb_hold", "sequential_setup", "sequential_hold"])
 
         current_pin = "N/A"
         in_timing = False
@@ -123,7 +123,7 @@ def parse_lib_gz(input_file, output_csv):
             if bracket_depth == 0:
                 t_type = accumulator.get("timing_type", "N/A")
                 if any(x in t_type for x in req_types):
-                    setup, hold, comb_setup, comb_hold = "N/A", "N/A", "N/A", "N/A"
+                    setup, hold, comb_setup, comb_hold, sequential_setup, sequential_hold = "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"
                     
                     if "combinational" in t_type:
                         # Extract required components
@@ -149,8 +149,18 @@ def parse_lib_gz(input_file, output_csv):
                         formatted = f'{pref} (({rm}, {rs}); ({fm}, {fs}))'
                         if "setup" in t_type: setup = formatted
                         else: hold = formatted
-
-                    writer.writerow([current_pin, accumulator["related_pin"], accumulator["mode"].replace('""', ''), setup, hold, comb_setup, comb_hold])
+                    elif "rising_edge" in t_type or "falling_edge":
+                        s_cr = accumulator["cell_rise"]
+                        s_cf = accumulator["cell_fall"]
+                        s_sr_early = accumulator["ocv_sigma_cell_rise_early"]
+                        s_sf_early = accumulator["ocv_sigma_cell_fall_early"]
+                        s_sr_late = accumulator["ocv_sigma_cell_rise_late"]
+                        s_sf_late = accumulator["ocv_sigma_cell_fall_late"]
+                        if "rising_edge" in t_type :
+                            sequential_setup = f"R (R ({s_cr}, {s_sr_late}); F ({s_cf},{s_sf_late}))"
+                        elif "falling_edge" in t_type :
+                            sequential_hold = f"F (R ({s_cr}, {s_sr_late}); F ({s_cf},{s_sf_late}))"
+                    writer.writerow([current_pin, accumulator["related_pin"], accumulator["mode"].replace('""', ''), setup, hold, comb_setup, comb_hold, sequential_setup, sequential_hold])
                 
                 in_timing = False
 
