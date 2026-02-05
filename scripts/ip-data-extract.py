@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import re
 import csv
@@ -25,6 +26,17 @@ def flush_buffer(writer, buffer):
         buffer["comb_setup_rise"], buffer["comb_setup_fall"], buffer["comb_hold_rise"], buffer["comb_hold_fall"],
         buffer["seq_clk_arc"], buffer["seq_setup_rise"], buffer["seq_setup_fall"], buffer["seq_hold_rise"], buffer["seq_hold_fall"]
     ])
+
+def read_directory_file(directory_list):
+    """Reads a file containing a list of directory paths."""
+    if not os.path.exists(directory_list):
+        print(f"Error: The manifest file '{directory_list}' was not found.")
+        return []
+    
+    with open(directory_list, 'r') as f:
+        # Returns list of absolute paths, ignoring empty lines
+        return [os.path.join(os.path.abspath(line.strip()), "") 
+                for line in f if line.strip()]
 
 def parse_lib_gz(input_file, output_csv):
     os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
@@ -167,8 +179,32 @@ def parse_lib_gz(input_file, output_csv):
         flush_buffer(writer, row_buffer)
         proc.terminate()
 
+def main():
+    parser = argparse.ArgumentParser(description="Automated Extraction Dispatcher")
+    # positional: accepts filepath for the directory list
+    parser.add_argument("filepath", help="Memory cut folder directory list file")
+    args = parser.parse_args()
+
+    dir_list = read_directory_file(args.filepath) # list of directory file paths
+
+    for path in dir_list:
+        abs_path = os.path.abspath(path)
+        if not os.path.isdir(abs_path):
+            print(f"Skipping: {abs_path} (Not a directory)")
+            continue
+            
+    for root, dirs, files in os.walk(abs_path):
+        for f in files:
+            if f.endswith(".lib.gz"):
+                full_input_path = os.path.join(root, f)
+                output_name = f.replace(".lib.gz", ".csv")
+                output_dir = "../extracted_data/pipecore-data"
+                output_csv_path = os.path.join(output_dir, output_name)
+                parse_lib_gz(full_input_path, output_csv_path)
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 script.py <input.lib.gz>")
     else:
-        parse_lib_gz(sys.argv[1], "../extracted_data/ip_log.csv")
+        main()
+print("completed extraction and logging of all files within direcotries in directory list")

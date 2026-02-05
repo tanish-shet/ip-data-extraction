@@ -1,0 +1,1 @@
+/proj/vendors/alphawave/pipecore/pipecore_taz_pipe128s4_a_18M_3Mx_2Fx_7Dx_2Hx_2Gx_2Iz_LB_8lane_0p8p5/liberty/
