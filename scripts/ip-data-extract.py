@@ -158,8 +158,10 @@ def parse_lib_gz(input_file, output_csv):
                         s_sf_late = accumulator["ocv_sigma_cell_fall_late"]
                         if "rising_edge" in t_type :
                             sequential_setup = f"R (R ({s_cr}, {s_sr_late}); F ({s_cf},{s_sf_late}))"
+                            sequential_hold = f"R (R ({s_cr}, {s_sr_early}); F({s_cf},{s_sf_early}))"
                         elif "falling_edge" in t_type :
-                            sequential_hold = f"F (R ({s_cr}, {s_sr_late}); F ({s_cf},{s_sf_late}))"
+                            sequential_setup = f"F (R ({s_cr}, {s_sr_late}); F ({s_cf},{s_sf_late}))"
+                            sequential_hold = f"F (R ({s_cr}, {s_sr_early}); F({s_cf},{s_sf_early}))"
                     writer.writerow([current_pin, accumulator["related_pin"], accumulator["mode"].replace('""', ''), setup, hold, comb_setup, comb_hold, sequential_setup, sequential_hold])
                 
                 in_timing = False
