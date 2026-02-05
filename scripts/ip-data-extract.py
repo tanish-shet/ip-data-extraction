@@ -20,7 +20,7 @@ def flush_buffer(writer, buffer):
     if not buffer:
         return
     writer.writerow([
-        buffer["pin"], buffer["related_pin"], buffer["mode"],
+        buffer["pin"], buffer["direction"], buffer["related_pin"], buffer["mode"],
         buffer["setup_rise"], buffer["setup_fall"], buffer["hold_rise"], buffer["hold_fall"],
         buffer["comb_setup_rise"], buffer["comb_setup_fall"], buffer["comb_hold_rise"], buffer["comb_hold_fall"],
         buffer["seq_clk_arc"], buffer["seq_setup_rise"], buffer["seq_setup_fall"], buffer["seq_hold_rise"], buffer["seq_hold_fall"]
@@ -31,6 +31,7 @@ def parse_lib_gz(input_file, output_csv):
 
     # Regex Patterns
     re_pin = re.compile(r'pin\s*\(\s*"?([^"\)\s]+)"?\s*\)\s*\{', re.IGNORECASE)
+    re_direction = re.compile(r'direction\s*:\s*([^;\s]+)\s*;', re.IGNORECASE)
     re_timing_open = re.compile(r'timing\s*\(\s*\)\s*\{', re.IGNORECASE)
     re_type = re.compile(r'timing_type\s*:\s*([^;\s]+)\s*;', re.IGNORECASE)
     re_related = re.compile(r'related_pin\s*:\s*"?([^";\s]+)"?\s*;', re.IGNORECASE)
@@ -49,12 +50,13 @@ def parse_lib_gz(input_file, output_csv):
     with open(output_csv, 'w', newline='') as f_csv:
         writer = csv.writer(f_csv)
         writer.writerow([
-            "pin", "related_pin", "mode", "setup_rise", "setup_fall", "hold_rise", "hold_fall", 
+            "pin", "direction", "related_pin", "mode", "setup_rise", "setup_fall", "hold_rise", "hold_fall", 
             "comb_setup_rise", "comb_setup_fall", "comb_hold_rise", "comb_hold_fall",
             "seq_clk_arc", "seq_setup_rise", "seq_setup_fall", "seq_hold_rise", "seq_hold_fall"
         ])
 
         current_pin = "N/A"
+        current_direction = "N/A"
         row_buffer = {}
         in_timing = False
         bracket_depth = 0
@@ -70,7 +72,13 @@ def parse_lib_gz(input_file, output_csv):
 
             if not in_timing:
                 pin_match = re_pin.search(raw_line)
-                if pin_match: current_pin = pin_match.group(1)
+                if pin_match: 
+                    current_pin = pin_match.group(1)
+                
+                dir_match = re_direction.search(raw_line)
+                if dir_match:
+                    current_direction = dir_match.group(1).strip()
+
                 if re_timing_open.search(raw_line):
                     in_timing = True
                     bracket_depth = 1
@@ -94,25 +102,28 @@ def parse_lib_gz(input_file, output_csv):
                 mf = re_min_flag.search(raw_line)
                 if mf: accumulator["min_delay_flag"] = mf.group(1).strip().lower()
 
-            # OCV / Table logic (same as before)
+            # Table logic
             sigma_match = re_sigma_type.search(raw_line)
             if sigma_match and pending_base_name:
                 active_table_key = f"{pending_base_name}_{sigma_match.group(1).strip()}"
+            
             if not capturing_values:
                 for t in ocv_tables + base_tables:
                     if re.search(r'\b' + t + r'\s*\(', raw_line):
                         if t in ocv_tables: pending_base_name = t
                         else: active_table_key = t
                         break
+            
             if active_table_key and "values (" in raw_line:
                 capturing_values, value_buffer = True, raw_line.split("values (", 1)[1]
             elif capturing_values:
                 value_buffer += " " + raw_line
+            
             if capturing_values and ");" in raw_line:
                 accumulator[active_table_key] = extract_4_4(value_buffer.split(");", 1)[0])
                 capturing_values, active_table_key, pending_base_name = False, None, None
 
-            # End of Timing Block
+            # End of Timing Block processing
             if bracket_depth == 0:
                 in_timing = False
                 t_type = accumulator.get("timing_type", "N/A")
@@ -122,37 +133,42 @@ def parse_lib_gz(input_file, output_csv):
                 mode = accumulator.get("mode", "N/A")
                 is_min = "true" in str(accumulator.get("min_delay_flag", "")).lower()
 
-                # Check if we need to flush the buffer (Pin/Related/Mode changed)
+                # Flush logic if key attributes change
                 if row_buffer and (row_buffer["pin"] != current_pin or row_buffer["related_pin"] != rel_pin or row_buffer["mode"] != mode):
                     flush_buffer(writer, row_buffer)
                     row_buffer = {}
 
-                # Initialize row_buffer if empty
                 if not row_buffer:
                     row_buffer = {
-                        "pin": current_pin, "related_pin": rel_pin, "mode": mode,
+                        "pin": current_pin, "direction": current_direction, "related_pin": rel_pin, "mode": mode,
                         "setup_rise": "N/A", "setup_fall": "N/A", "hold_rise": "N/A", "hold_fall": "N/A",
                         "comb_setup_rise": "N/A", "comb_setup_fall": "N/A", "comb_hold_rise": "N/A", "comb_hold_fall": "N/A",
                         "seq_clk_arc": "N/A", "seq_setup_rise": "N/A", "seq_setup_fall": "N/A", "seq_hold_rise": "N/A", "seq_hold_fall": "N/A"
                     }
 
-                # Fill the buffer based on t_type
+                # Data mapping
                 if "combinational" in t_type:
-                    if is_min: row_buffer["comb_hold_rise"], row_buffer["comb_hold_fall"] = accumulator["cell_rise"], accumulator["cell_fall"]
-                    else: row_buffer["comb_setup_rise"], row_buffer["comb_setup_fall"] = accumulator["cell_rise"], accumulator["cell_fall"]
+                    if is_min: 
+                        row_buffer["comb_hold_rise"], row_buffer["comb_hold_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
+                    else: 
+                        row_buffer["comb_setup_rise"], row_buffer["comb_setup_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
                 elif "setup" in t_type:
-                    row_buffer["setup_rise"], row_buffer["setup_fall"] = accumulator["rise_constraint"], accumulator["fall_constraint"]
+                    row_buffer["setup_rise"], row_buffer["setup_fall"] = accumulator.get("rise_constraint", "N/A"), accumulator.get("fall_constraint", "N/A")
                 elif "hold" in t_type:
-                    row_buffer["hold_rise"], row_buffer["hold_fall"] = accumulator["rise_constraint"], accumulator["fall_constraint"]
+                    row_buffer["hold_rise"], row_buffer["hold_fall"] = accumulator.get("rise_constraint", "N/A"), accumulator.get("fall_constraint", "N/A")
                 elif "edge" in t_type:
                     row_buffer["seq_clk_arc"] = "R" if "rising" in t_type else "F"
-                    if is_min: row_buffer["seq_hold_rise"], row_buffer["seq_hold_fall"] = accumulator["cell_rise"], accumulator["cell_fall"]
-                    else: row_buffer["seq_setup_rise"], row_buffer["seq_setup_fall"] = accumulator["cell_rise"], accumulator["cell_fall"]
+                    if is_min: 
+                        row_buffer["seq_hold_rise"], row_buffer["seq_hold_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
+                    else: 
+                        row_buffer["seq_setup_rise"], row_buffer["seq_setup_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
 
-        # Final flush for the last record
+        # Final record flush
         flush_buffer(writer, row_buffer)
         proc.terminate()
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2: print("Usage: python3 script.py <input.lib.gz>")
-    else: parse_lib_gz(sys.argv[1], "../extracted_data/ip_log.csv")
+    if len(sys.argv) < 2:
+        print("Usage: python3 script.py <input.lib.gz>")
+    else:
+        parse_lib_gz(sys.argv[1], "../extracted_data/ip_log.csv")
