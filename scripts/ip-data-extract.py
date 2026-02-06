@@ -5,6 +5,11 @@ import csv
 import sys
 import os
 
+#default output directory
+DEFAULT_DIR = "../extracted_data/pipecore-data"
+#Scratch/ dummy output directory
+TEST_DIR = "../extracted_data/test-data"
+
 def extract_4_4(raw_str):
     if not raw_str or raw_str == "N/A": return "N/A"
     clean = raw_str.replace('\\', ' ').replace('"', ' ').replace('\n', ' ')
@@ -14,10 +19,12 @@ def extract_4_4(raw_str):
         return tokens[27]  
     elif num_tokens > 3:
         return tokens[3]   
+    else :
+        return tokens [0]
     return "N/A"
 
 def flush_buffer(writer, buffer):
-    """Writes the accumulated data for a specific pin/related_pin/mode to the CSV."""
+    # Writes the accumulated data for a specific pin/related_pin/mode to the CSV.
     if not buffer:
         return
     writer.writerow([
@@ -28,7 +35,7 @@ def flush_buffer(writer, buffer):
     ])
 
 def read_directory_file(directory_list):
-    """Reads a file containing a list of directory paths."""
+    # Reads a file containing a list of directory paths.
     if not os.path.exists(directory_list):
         print(f"Error: The manifest file '{directory_list}' was not found.")
         return []
@@ -41,7 +48,7 @@ def read_directory_file(directory_list):
 def parse_lib_gz(input_file, output_csv):
     os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
 
-    # Regex Patterns
+    # Regex Patterns for required fields that need to be extracted from .lib
     re_pin = re.compile(r'pin\s*\(\s*"?([^"\)\s]+)"?\s*\)\s*\{', re.IGNORECASE)
     re_direction = re.compile(r'direction\s*:\s*([^;\s]+)\s*;', re.IGNORECASE)
     re_timing_open = re.compile(r'timing\s*\(\s*\)\s*\{', re.IGNORECASE)
@@ -100,7 +107,7 @@ def parse_lib_gz(input_file, output_csv):
             bracket_depth += raw_line.count('{')
             bracket_depth -= raw_line.count('}')
 
-            # Capture Metadata
+            # capture timing_type, realted_pin, mode etc - that occur right after timing() block starts
             if "timing_type" in raw_line:
                 tm = re_type.search(raw_line)
                 if tm: accumulator["timing_type"] = tm.group(1).strip()
@@ -114,7 +121,7 @@ def parse_lib_gz(input_file, output_csv):
                 mf = re_min_flag.search(raw_line)
                 if mf: accumulator["min_delay_flag"] = mf.group(1).strip().lower()
 
-            # Table logic
+            # Table logic (fxn to log sigma values based on argument is still  to be added)
             sigma_match = re_sigma_type.search(raw_line)
             if sigma_match and pending_base_name:
                 active_table_key = f"{pending_base_name}_{sigma_match.group(1).strip()}"
@@ -158,7 +165,7 @@ def parse_lib_gz(input_file, output_csv):
                         "seq_clk_arc": "N/A", "seq_setup_rise": "N/A", "seq_setup_fall": "N/A", "seq_hold_rise": "N/A", "seq_hold_fall": "N/A"
                     }
 
-                # Data mapping
+                # conditional writes to buffer based on timing_type
                 if "combinational" in t_type:
                     if is_min: 
                         row_buffer["comb_hold_rise"], row_buffer["comb_hold_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
@@ -175,36 +182,42 @@ def parse_lib_gz(input_file, output_csv):
                     else: 
                         row_buffer["seq_setup_rise"], row_buffer["seq_setup_fall"] = accumulator.get("cell_rise", "N/A"), accumulator.get("cell_fall", "N/A")
 
-        # Final record flush
+        # call fxn that writes to csv log file
         flush_buffer(writer, row_buffer)
         proc.terminate()
 
 def main():
     parser = argparse.ArgumentParser(description="Automated Extraction Dispatcher")
-    # positional: accepts filepath for the directory list
-    parser.add_argument("filepath", help="Memory cut folder directory list file")
+    parser.add_argument("filepath", help="File containing list of directory paths to scan")
     args = parser.parse_args()
 
-    dir_list = read_directory_file(args.filepath) # list of directory file paths
+    dir_list = read_directory_file(args.filepath)
+    file_list = []
 
     for path in dir_list:
-        abs_path = os.path.abspath(path)
-        if not os.path.isdir(abs_path):
-            print(f"Skipping: {abs_path} (Not a directory)")
+        if not os.path.isdir(path):
+            print(f"Skipping: {path} (Not a directory)")
             continue
-            
-    for root, dirs, files in os.walk(abs_path):
-        for f in files:
-            if f.endswith(".lib.gz"):
-                full_input_path = os.path.join(root, f)
-                output_name = f.replace(".lib.gz", ".csv")
-                output_dir = "../extracted_data/pipecore-data"
-                output_csv_path = os.path.join(output_dir, output_name)
-                parse_lib_gz(full_input_path, output_csv_path)
+        for root, _, files in os.walk(path):
+            for f in files:
+                if f.endswith(".lib.gz"):
+                    file_list.append(os.path.join(root, f))
+
+    total_files = len(file_list)
+    if total_files == 0:
+        print("No .lib.gz files found.")
+        return
+
+    print(f"Found {total_files} files. Starting analysis...")
+    
+    for idx, full_input_path in enumerate(file_list, 1):
+        filename = os.path.basename(full_input_path)
+        output_name = filename.replace(".lib.gz", ".csv")
+        output_csv_path = os.path.join(TEST_DIR, output_name)
+        print(f" Progress: [{idx}/{total_files}] analyzing {filename}...", end="\r")
+        parse_lib_gz(full_input_path, output_csv_path)
+
+    print("\nCompleted extraction of all files.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 script.py <input.lib.gz>")
-    else:
-        main()
-print("completed extraction and logging of all files within direcotries in directory list")
+    main()
