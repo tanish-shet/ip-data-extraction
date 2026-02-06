@@ -19,8 +19,8 @@ def extract_4_4(raw_str):
         return tokens[27]  
     elif num_tokens > 3:
         return tokens[3]   
-    else :
-        return tokens [0]
+    '''else :
+        return tokens [0]'''
     return "N/A"
 
 def flush_buffer(writer, buffer):
