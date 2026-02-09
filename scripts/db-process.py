@@ -12,7 +12,7 @@ def load_database(db_folderpath):
         print(f"Error: {db_folderpath} is not a valid directory.")
         return all_databases
 
-    # Sort files to ensure consistent order during DFS traversal/comparison
+    # sort files to ensure consistent order during DFS traversal/comparison
     filenames = sorted([f for f in os.listdir(db_folderpath) if f.endswith('.json')])
 
     for filename in filenames:
@@ -25,7 +25,8 @@ def load_database(db_folderpath):
                 
     return all_databases
 
-def db_compare_arc(databases, start_pin, visited=None, depth=0):
+
+def db_compare_arc(databases, start_pin, visited=None, depth=0): #fxn to compare arc/ path consistency across dbs
     if visited is None:
         visited = set()
     indent = "  " * depth
@@ -50,7 +51,7 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
         print(f"{indent}PIN: {start_pin} (Already visited, skipping)")
         return True
 
-    # consistency Check: to verify if given start_pin is in ALL databases?
+    # consistency check: to verify if given start_pin is in "ALL" databases files?
     if not all(start_pin in db for db in databases):
         print(f"{indent}PIN: {start_pin}")
         print(f"{indent}  [!] ERROR: Structural Mismatch. Pin missing in some DBs.")
@@ -82,68 +83,103 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
 
     return True
 
-def attribute_retrival():
 
-    pass
+def attribute_retrieval(databases, start_pin, target_attribute):
+    """
+    Retrieves and prints a specific attribute for all arcs of a pin,
+    organized by database index.
+    """
+    print(f"\nAttribute Retrieval for Pin: {start_pin}")
+    print(f"Target Attribute: {target_attribute}")
+
+    for idx, db in enumerate(databases):
+        print(f"\n---- DB Index: {idx} ----")
+        # fetch the list of dictionaries for the start_pin
+        arcs = db.get(start_pin)    
+        if arcs is None:
+            print(f"  [!] Error: Pin '{start_pin}' not found in this database.")
+            continue            
+        # iterate through each arc (dictionary)
+        for i, arc in enumerate(arcs):
+            related_pin = arc.get("related_pin", "N/A")
+            mode = arc.get("mode", "N/A")
+            
+            # retrieve the specific attribute value
+            attr_value = arc.get(target_attribute, "NOT FOUND")
+            
+            # formatting the output as requested
+            print(f"  Arc {i} {{{related_pin} | {mode}}}")
+            print(f"    {target_attribute} : {attr_value}")
 
 def attribute_spread():
     pass
 
 def main():
     parser = argparse.ArgumentParser(description="Automated Timing Database Comparison Tool")
-    #input arguments
-    parser.add_argument("folderpath", help="Path to the directory containing JSON database files")    #mandatory argument
-    parser.add_argument("--compare", action="store_true", help="Enable structural path tracing across all databases")    
-    parser.add_argument("--arc", nargs="+", help="The starting pin(s) to begin the DFS traversal")    
-    parser.add_argument("--all", action = "store_true", help = "Passes entire list of \"key\" \ \"parent\" pins to required fxn")
-    parser.add_argument("--spread", nargs="+", help="Attribute names to check for numerical spread (e.g., setup_rise)")
+    parser.add_argument("folderpath", help="Path to the directory containing JSON database files")
+    parser.add_argument("--compare", action="store_true", help="Enable structural path tracing")    
+    parser.add_argument("--pins", nargs="+", help="The starting pin(s) to begin the DFS traversal")    
+    parser.add_argument("--all", action="store_true", help="Process all parent pins from the reference DB")
+    parser.add_argument("--get_attribute", help=" to fetch values across PVTX db for a given attribue type")
+    parser.add_argument("--spread", nargs="+", help="Attribute names to check for numerical spread")
     args = parser.parse_args()
 
-    # load all databases from the folder
+    # load Data
     all_dbs = load_database(args.folderpath)
-    
     if not all_dbs:
-        print("Error: No valid JSON databases found in the specified directory.")
+        print("Error: No valid JSON databases found.")
         sys.exit(1)
 
     print(f"Successfully loaded {len(all_dbs)} database(s).")
+    ref_db = all_dbs[0]
 
-    # execute comparison/ trace Logic
+    # pin selection Logic - either select all pins (when --all) else just those mentioned with --arc option
+    pins_to_trace = [] 
+    if args.all:
+        print("Mode: Tracing ALL pins from reference database.")
+        pins_to_trace = list(ref_db.keys())
+    elif args.pins:
+        pins_to_trace = args.pins
+
+    # comparison of timing arc relations across DBs
     if args.compare:
-        if not args.arc:
-            print("Error: --compare requires at least one starting pin via --arc.")
+        if not pins_to_trace:
+            print("Error: --compare requires either --pins or --all.")
             sys.exit(1)
 
+        overall_trace_success = True
+        global_visited = set()  # Avoid re-tracing shared paths
+            
         print("\n" + "="*50)
         print("STARTING PATH INTEGRITY CHECK")
         print("="*50)
 
-        overall_trace_success = True
-        
-        for start_pin in args.arc:
-            print(f"\n--- Tracing Arc Chain for: {start_pin} ---")
-            
-            # initialize a fresh visited set for every starting arc & initial depth is 0 for proper indentation
-            is_consistent = db_compare_arc(all_dbs, start_pin, visited=set(), depth=0)
-            
-            if not is_consistent:
-                overall_trace_success = False
-                print(f"\nResult: [FAILED] Path discrepancy found starting at {start_pin}")
-            else:
-                print(f"\nResult: [PASSED] Path is consistent across all DBs for {start_pin}")
+        for start_pin in pins_to_trace:
+            # to be skipped if this pin was already covered as a sub-arc of a previous trace
+            if start_pin not in global_visited:
+                print(f"\n--- Tracing Arc Chain for: {start_pin} ---")                
+                # use global_visited to mark every node in the path as "processed"
+                is_consistent = db_compare_arc(all_dbs, start_pin, visited=global_visited, depth=0)
+                
+                if not is_consistent:
+                    overall_trace_success = False
+                    print(f"Result: [FAILED] Discrepancy found starting at {start_pin}") #might add debug path for failing/ inconsistent DB
+                else:
+                    print(f"Result: [PASSED] {start_pin} chain is consistent.")
 
         print("\n" + "="*50)
-        if overall_trace_success:
-            print("ALL PATHS CONSISTENT")
-        else:
-            print("STRUCTURAL MISMATCH DETECTED")
+        print("ALL PATHS CONSISTENT" if overall_trace_success else "STRUCTURAL MISMATCH DETECTED")
         print("="*50)
 
-    '''# 3. Placeholder for future spread logic
+    # attribute retrieval
+    elif args.pins and args.get_attribute:
+        for pin in args.pins:
+            attribute_retrieval(all_dbs, pin, args.get_attribute)
+
+    # placeholder
     if args.spread:
-        # This will be called once attribute_spread is implemented
-        print("\nSpread analysis requested for:", args.spread)
-        # attribute_spread(all_dbs, args.arc, args.spread)'''
+        # attribute_spread(all_dbs, pins_to_trace, args.spread)
+        pass
 
 if __name__ == "__main__":
     main()
