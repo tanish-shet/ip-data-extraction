@@ -4,6 +4,7 @@ import re #optional if regex patterns being scanned -ma delete
 import sys
 import os
 import json
+import matplotlib.pyplot as plt
 
 def load_database(db_folderpath):
     #fxn to load all db files (.json format) - returns a list of all .json files within target db folder
@@ -86,33 +87,96 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0): #fxn to compare
 
 def attribute_retrieval(databases, start_pin, target_attribute):
     """
-    Retrieves and prints a specific attribute for all arcs of a pin,
-    organized by database index.
+    Extracts raw data. Values are converted to float where possible.
+    Returns: { db_index: [ {related_pin, mode, value}, ... ] }
     """
+    raw_results = {}
+    for idx, db in enumerate(databases):
+        arcs = db.get(start_pin)
+        if arcs is None:
+            raw_results[idx] = None
+            continue
+        
+        db_arcs = []
+        for arc in arcs:
+            val = arc.get(target_attribute, "N/A")
+            # Convert to float for math; use None for non-numeric data
+            try:
+                num_val = float(val)
+            except (ValueError, TypeError):
+                num_val = None
+                
+            db_arcs.append({
+                "related_pin": arc.get("related_pin", "N/A"),
+                "mode": arc.get("mode", "N/A"),
+                "value": num_val
+            })
+        raw_results[idx] = db_arcs
+    return raw_results
+
+#fxn to print retrieed attributes
+def attribute_print_pretty(data_map, start_pin, target_attribute):
     print(f"\nAttribute Retrieval for Pin: {start_pin}")
     print(f"Target Attribute: {target_attribute}")
 
-    for idx, db in enumerate(databases):
-        print(f"\n---- DB Index: {idx} ----")
-        # fetch the list of dictionaries for the start_pin
-        arcs = db.get(start_pin)    
+    for db_idx, arcs in data_map.items():
+        print(f"\n---- DB Index: {db_idx} ----")
+        
         if arcs is None:
-            print(f"  [!] Error: Pin '{start_pin}' not found in this database.")
-            continue            
-        # iterate through each arc (dictionary)
-        for i, arc in enumerate(arcs):
-            related_pin = arc.get("related_pin", "N/A")
-            mode = arc.get("mode", "N/A")
-            
-            # retrieve the specific attribute value
-            attr_value = arc.get(target_attribute, "NOT FOUND")
-            
-            # formatting the output as requested
-            print(f"  Arc {i} {{{related_pin} | {mode}}}")
-            print(f"    {target_attribute} : {attr_value}")
+            print(f"  [!] Pin '{start_pin}' not found in this database.")
+            continue
 
-def attribute_spread():
-    pass
+        for i, arc in enumerate(arcs):
+            # print format: arc i {related_pin | mode}
+            print(f"  Arc {i} {{{arc['related_pin']} | {arc['mode']}}}")
+            print(f"    {target_attribute} : {arc['value']}")
+
+
+
+def attribute_spread(databases, start_pin, target_attribute):
+
+    #Fetch data using retrieval function
+    data_map = attribute_retrieval(databases, start_pin, target_attribute)
+    
+    #Extract valid numerical values for analysis
+    numeric_values = [
+        arc["value"] for arcs in data_map.values() 
+        if arcs for arc in arcs if arc["value"] is not None
+    ]
+
+    if not numeric_values:
+        print(f"[!] No valid numerical data found for '{target_attribute}' on pin '{start_pin}'.")
+        return
+
+    #Stats Calculation
+    v_min, v_max = min(numeric_values), max(numeric_values)
+    v_spread = v_max - v_min
+
+    print(f"\n" + "="*40)
+    print(f"SPREAD ANALYSIS: {start_pin}")
+    print(f"Attribute: {target_attribute}")
+    print("-" * 40)
+    print(f"Minimum Value: {v_min:.6f}")
+    print(f"Maximum Value: {v_max:.6f}")
+    print(f"Total Spread:  {v_spread:.6f}")
+    print("="*40 + "\n")
+
+    #Histogram Generation
+    plt.figure(figsize=(10, 6))
+    plt.hist(numeric_values, bins='auto', color='#3498db', edgecolor='black', alpha=0.8)
+    
+    # Visual cues: vertical lines for Min/Max
+    plt.axvline(v_min, color='red', linestyle='dashed', linewidth=1, label=f'Min: {v_min:.4f}')
+    plt.axvline(v_max, color='green', linestyle='dashed', linewidth=1, label=f'Max: {v_max:.4f}')
+    
+    plt.title(f"Histogram of {target_attribute}\nPin: {start_pin}")
+    plt.xlabel("Attribute Value")
+    plt.ylabel("Frequency (Arc Occurrences)")
+    plt.legend()
+    plt.grid(axis='y', alpha=0.3)
+    
+    plt.show()
+
 
 def main():
     parser = argparse.ArgumentParser(description="Automated Timing Database Comparison Tool")
@@ -121,7 +185,7 @@ def main():
     parser.add_argument("--pins", nargs="+", help="The starting pin(s) to begin the DFS traversal")    
     parser.add_argument("--all", action="store_true", help="Process all parent pins from the reference DB")
     parser.add_argument("--get_attribute", help=" to fetch values across PVTX db for a given attribue type")
-    parser.add_argument("--spread", nargs="+", help="Attribute names to check for numerical spread")
+    parser.add_argument("--spread", action="store_true", help="Flag to trigger spread/histogram analysis")
     args = parser.parse_args()
 
     # load Data
@@ -134,27 +198,27 @@ def main():
     ref_db = all_dbs[0]
 
     # pin selection Logic - either select all pins (when --all) else just those mentioned with --arc option
-    pins_to_trace = [] 
+    target_pins = [] 
     if args.all:
         print("Mode: Tracing ALL pins from reference database.")
-        pins_to_trace = list(ref_db.keys())
+        target_pins = list(ref_db.keys())
     elif args.pins:
-        pins_to_trace = args.pins
+        target_pins = args.pins
 
     # comparison of timing arc relations across DBs
     if args.compare:
-        if not pins_to_trace:
+        if not target_pins:
             print("Error: --compare requires either --pins or --all.")
             sys.exit(1)
 
         overall_trace_success = True
-        global_visited = set()  # Avoid re-tracing shared paths
+        global_visited = set()  # avoid re-tracing shared paths
             
         print("\n" + "="*50)
         print("STARTING PATH INTEGRITY CHECK")
         print("="*50)
 
-        for start_pin in pins_to_trace:
+        for start_pin in target_pins:
             # to be skipped if this pin was already covered as a sub-arc of a previous trace
             if start_pin not in global_visited:
                 print(f"\n--- Tracing Arc Chain for: {start_pin} ---")                
@@ -171,15 +235,18 @@ def main():
         print("ALL PATHS CONSISTENT" if overall_trace_success else "STRUCTURAL MISMATCH DETECTED")
         print("="*50)
 
+    #spread analysis
+    elif args.spread:
+        if not args.pins or not args.get_attribute:
+            sys.exit("Error: --spread requires --pin and --get_attribute.")
+        for p in args.pins:
+            attribute_spread(all_dbs, p, args.get_attribute)
+    
     # attribute retrieval
     elif args.pins and args.get_attribute:
         for pin in args.pins:
-            attribute_retrieval(all_dbs, pin, args.get_attribute)
-
-    # placeholder
-    if args.spread:
-        # attribute_spread(all_dbs, pins_to_trace, args.spread)
-        pass
+            results = attribute_retrieval(all_dbs, pin, args.get_attribute)
+            attribute_print_pretty(results, pin, args.get_attribute)
 
 if __name__ == "__main__":
     main()
