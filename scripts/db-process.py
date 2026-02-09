@@ -26,33 +26,36 @@ def load_database(db_folderpath):
                 
     return all_databases
 
-
-def db_compare_arc(databases, start_pin, visited=None, depth=0): #fxn to compare arc/ path consistency across dbs
+def db_compare_arc(databases, start_pin, visited=None, depth=0):
+    """Compare arc/path consistency across databases"""
     if visited is None:
         visited = set()
     indent = "  " * depth
 
+    # Handle N/A pins
     if start_pin == "N/A":
         return True
-    # check if the pin exists in any database
+    
+    # Check if the pin exists in any database
     pin_exists_anywhere = any(start_pin in db for db in databases)
-    # if the pin doesn't exist...
+    
+    # If the pin doesn't exist...
     if not pin_exists_anywhere:
         if len(visited) == 0:
             # Case A: User gave an invalid starting pin
             print(f"[!] ERROR: Starting pin '{start_pin}' is invalid (not found in any DB).")
             return False
         else:
-            # Case B:  reached a terminal related_pin (standard leaf node)
+            # Case B: Reached a terminal related_pin (standard leaf node)
             print(f"{indent}[RELATED_PIN] {start_pin}")
             return True
 
-    # to prevent infinite traversal
+    # Prevent infinite traversal
     if start_pin in visited:
         print(f"{indent}PIN: {start_pin} (Already visited, skipping)")
         return True
 
-    # consistency check: to verify if given start_pin is in "ALL" databases files?
+    # Consistency check: verify if given start_pin is in ALL databases
     if not all(start_pin in db for db in databases):
         print(f"{indent}PIN: {start_pin}")
         print(f"{indent}  [!] ERROR: Structural Mismatch. Pin missing in some DBs.")
@@ -61,21 +64,56 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0): #fxn to compare
     print(f"{indent}PIN: {start_pin}")
     visited.add(start_pin)
 
+    # Get all arc lists for this pin from all databases
     all_arc_lists = [db[start_pin] for db in databases]
-    if len(set(len(l) for l in all_arc_lists)) > 1:
+    
+    # Check if all databases have the same number of arcs
+    num_arcs_per_db = []
+    for db_arcs in all_arc_lists:
+        num_arcs_per_db.append(len(db_arcs))
+    
+    first_count = num_arcs_per_db[0]
+    all_same_count = True
+    for count in num_arcs_per_db:
+        if count != first_count:
+            all_same_count = False
+            break
+    
+    if not all_same_count:
         print(f"{indent}  [!] ERROR: Arc count mismatch.")
+        print(f"{indent}      Arc counts: {num_arcs_per_db}")
         return False
 
-    for i, arc_group in enumerate(zip(*all_arc_lists)):
-        related_pins = [arc.get("related_pin") for arc in arc_group]
-        next_pin = related_pins[0]
+    # Get the number of arcs (they're all the same at this point)
+    num_arcs = len(all_arc_lists[0])
 
-        if len(set(related_pins)) > 1:
-            print(f"{indent}  [!] PATH MISMATCH at arc {i}: {related_pins}")
+    # Check each arc position
+    for arc_index in range(num_arcs):
+        # Collect all related_pins at this arc position
+        pins_at_this_arc = []
+        for db_arcs in all_arc_lists:
+            pin = db_arcs[arc_index].get("related_pin")
+            pins_at_this_arc.append(pin)
+        
+        # Check if they're all the same
+        first_pin = pins_at_this_arc[0]
+        all_same = True
+        
+        for pin in pins_at_this_arc:
+            if pin != first_pin:
+                all_same = False
+                break
+        
+        if not all_same:
+            print(f"{indent}  [!] PATH MISMATCH at arc {arc_index}")
+            print(f"{indent}      Found: {pins_at_this_arc}")
             return False
-
-        print(f"{indent}  [Arc {i}] {start_pin} ---> {next_pin}")
-
+        
+        # All databases agree on this arc
+        next_pin = first_pin
+        print(f"{indent}  [Arc {arc_index}] {start_pin} ---> {next_pin}")
+        
+        # Recurse if needed
         if next_pin and next_pin != "N/A":
             if not db_compare_arc(databases, next_pin, visited, depth + 1):
                 return False
@@ -83,6 +121,7 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0): #fxn to compare
             print(f"{indent}    [RELATED_PIN] N/A")
 
     return True
+
 
 
 def attribute_retrieval(databases, start_pin, target_attribute):
