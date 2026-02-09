@@ -4,6 +4,7 @@ import re
 import csv
 import sys
 import os
+import json
 
 # default output directory
 DEFAULT_DIR = "../extracted_data/pipecore-data"
@@ -37,19 +38,6 @@ def create_file_list(directory_list):
                     file_list.append(os.path.join(root, f))    
     return file_list 
   
-    
-def flush_buffer(writer, buffer):
-    # writes the accumulated data for a specific pin/related_pin/mode to the CSV.
-    # writer here is the object created by csv.writer() method in csv_logger() fxn
-    if not buffer:
-        return
-    writer.writerow([
-        buffer["pin"], buffer["direction"], buffer["related_pin"], buffer["mode"],
-        buffer["setup_rise"], buffer["setup_fall"], buffer["hold_rise"], buffer["hold_fall"],
-        buffer["comb_setup_rise"], buffer["comb_setup_fall"], buffer["comb_hold_rise"], buffer["comb_hold_fall"],
-        buffer["seq_clk_arc"], buffer["seq_setup_rise"], buffer["seq_setup_fall"], buffer["seq_hold_rise"], buffer["seq_hold_fall"]
-    ])
-
 def extract_values(raw_str):
     if not raw_str or raw_str == "N/A": return "N/A"
     clean = raw_str.replace('\\', ' ').replace('"', ' ').replace('\n', ' ')
@@ -196,8 +184,66 @@ def parse_lib(input_file):
         
     proc.terminate()
 
-def create_json_db():
-    pass  
+#fxn that creates blocks to be written to json db
+def create_json_db_block(input_file):
+    database = {}
+    
+    for pin_data_buffer in parse_lib(input_file):
+        pin_name = pin_data_buffer.get("pin")
+        if not pin_name:
+            continue
+
+        # create the arc data object
+        arc_entry = {
+            "related_pin": pin_data_buffer.get("related_pin"),
+            "direction": pin_data_buffer.get("direction"),
+            "mode": pin_data_buffer.get("mode"),
+            "setup_rise": pin_data_buffer.get("setup_rise"),
+            "setup_fall": pin_data_buffer.get("setup_fall"),
+            "hold_rise": pin_data_buffer.get("hold_rise"),
+            "hold_fall": pin_data_buffer.get("hold_fall"),
+            "comb_setup_rise": pin_data_buffer.get("comb_setup_rise"),
+            "comb_setup_fall": pin_data_buffer.get("comb_setup_fall"),
+            "comb_hold_rise": pin_data_buffer.get("comb_hold_rise"),
+            "comb_hold_fall": pin_data_buffer.get("comb_hold_fall"),
+            "seq_clk_arc": pin_data_buffer.get("seq_clk_arc"),
+            "seq_setup_rise": pin_data_buffer.get("seq_setup_rise"),
+            "seq_setup_fall": pin_data_buffer.get("seq_setup_fall"),
+            "seq_hold_rise": pin_data_buffer.get("seq_hold_rise"),
+            "seq_hold_fall": pin_data_buffer.get("seq_hold_fall")
+        }
+
+        # if this is the first time we see the pin, create a list
+        if pin_name not in database:
+            database[pin_name] = []
+
+        # add the arc to the list (No overwriting!)
+        database[pin_name].append(arc_entry)
+
+    return database
+def json_db_logger(database_content, output_json_path):
+    """
+    Accepts the dictionary returned by create_json_db_block 
+    and saves it as a formatted JSON file.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(output_json_path)), exist_ok=True)
+    with open(output_json_path, 'w', encoding='utf-8') as f_json:
+        json.dump(database_content, f_json, indent=4, sort_keys=False)
+
+    print(f"Successfully logged database to: {output_json_path}")
+
+    
+def flush_buffer(writer, buffer):
+    # writes the accumulated data for a specific pin/related_pin/mode to the CSV.
+    # writer here is the object created by csv.writer() method in csv_logger() fxn
+    if not buffer:
+        return
+    writer.writerow([
+        buffer["pin"], buffer["direction"], buffer["related_pin"], buffer["mode"],
+        buffer["setup_rise"], buffer["setup_fall"], buffer["hold_rise"], buffer["hold_fall"],
+        buffer["comb_setup_rise"], buffer["comb_setup_fall"], buffer["comb_hold_rise"], buffer["comb_hold_fall"],
+        buffer["seq_clk_arc"], buffer["seq_setup_rise"], buffer["seq_setup_fall"], buffer["seq_hold_rise"], buffer["seq_hold_fall"]
+    ])
 
 #fxn to log data to csv
 def csv_logger(input_file, output_csv):
@@ -213,13 +259,15 @@ def csv_logger(input_file, output_csv):
         ])
 
         # iterate through the generator
-        # this calls parse_lib and waits for it to 'yield' data
-        for pin_data in parse_lib(input_file):
-            flush_buffer(writer, pin_data)
+        # this calls parse_lib and waits for it to 'yield' data & pin_data_buffer is the variable that holds row_buffer once it yields
+        for pin_data_buffer in parse_lib(input_file):
+            flush_buffer(writer, pin_data_buffer)
 
 def main():
     parser = argparse.ArgumentParser(description="Automated Extraction Dispatcher")
     parser.add_argument("filepath", help="File containing list of directory paths to scan")
+    parser.add_argument("--csv",action = "store_true",help="Logs extracted data for a lib file in csv format")
+    parser.add_argument("--db",action = "store_true", help="Logs data into a db in json format")
     args = parser.parse_args()
 
     #fxn call that returns directory_list after reading a given directory-list file
@@ -237,10 +285,24 @@ def main():
     
     for idx, full_input_path in enumerate(f_list, 1):
         filename = os.path.basename(full_input_path)
-        output_name = filename.replace(".lib.gz", ".csv")
-        output_csv_path = os.path.join(TEST_DIR, output_name)
+
+        csv_log_name = filename.replace(".lib.gz", ".csv")
+        json_db_name = filename.replace(".lib.gz", ".json")
+
+        output_csv_path = os.path.join(TEST_DIR, csv_log_name)
+        output_json_path = os.path.join(TEST_DIR, json_db_name)
+
         print(f" Progress: [{idx}/{total_files}] analyzing {filename}...", end="\r")
-        csv_logger(full_input_path, output_csv_path)
+
+        if args.csv:
+            csv_logger(full_input_path, output_csv_path)
+
+        elif args.db:
+            db_block = create_json_db_block(full_input_path)
+            json_db_logger(db_block, output_json_path)
+        else:
+            csv_logger(full_input_path, output_csv_path)
+
 
     print("\nCompleted extraction of all files.")
 
