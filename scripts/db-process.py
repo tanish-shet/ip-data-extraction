@@ -27,19 +27,16 @@ def load_database(db_folderpath):
     return all_databases
 
 def db_compare_arc(databases, start_pin, visited=None, depth=0):
-    """Compare arc/path consistency across databases"""
+ #fxn to compare arcs for a given pin across all DBs
     if visited is None:
         visited = set()
     indent = "  " * depth
 
-    # Handle N/A pins
     if start_pin == "N/A":
         return True
-    
-    # Check if the pin exists in any database
+
     pin_exists_anywhere = any(start_pin in db for db in databases)
-    
-    # If the pin doesn't exist...
+
     if not pin_exists_anywhere:
         if len(visited) == 0:
             # Case A: User gave an invalid starting pin
@@ -50,12 +47,12 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
             print(f"{indent}[RELATED_PIN] {start_pin}")
             return True
 
-    # Prevent infinite traversal
+    # prevent infinite traversal
     if start_pin in visited:
         print(f"{indent}PIN: {start_pin} (Already visited, skipping)")
         return True
 
-    # Consistency check: verify if given start_pin is in ALL databases
+    # consistency check: verify if given start_pin is in ALL databases
     if not all(start_pin in db for db in databases):
         print(f"{indent}PIN: {start_pin}")
         print(f"{indent}  [!] ERROR: Structural Mismatch. Pin missing in some DBs.")
@@ -64,10 +61,10 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
     print(f"{indent}PIN: {start_pin}")
     visited.add(start_pin)
 
-    # Get all arc lists for this pin from all databases
+    # get all arc lists for this pin from all databases
     all_arc_lists = [db[start_pin] for db in databases]
     
-    # Check if all databases have the same number of arcs
+    # check if all databases have the same number of arcs
     num_arcs_per_db = []
     for db_arcs in all_arc_lists:
         num_arcs_per_db.append(len(db_arcs))
@@ -84,18 +81,16 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
         print(f"{indent}      Arc counts: {num_arcs_per_db}")
         return False
 
-    # Get the number of arcs (they're all the same at this point)
     num_arcs = len(all_arc_lists[0])
 
-    # Check each arc position
     for arc_index in range(num_arcs):
-        # Collect all related_pins at this arc position
+        # collect all related_pins at this arc position
         pins_at_this_arc = []
         for db_arcs in all_arc_lists:
             pin = db_arcs[arc_index].get("related_pin")
             pins_at_this_arc.append(pin)
         
-        # Check if they're all the same
+        # check if they're all the same
         first_pin = pins_at_this_arc[0]
         all_same = True
         
@@ -108,12 +103,11 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
             print(f"{indent}  [!] PATH MISMATCH at arc {arc_index}")
             print(f"{indent}      Found: {pins_at_this_arc}")
             return False
-        
-        # All databases agree on this arc
+
         next_pin = first_pin
         print(f"{indent}  [Arc {arc_index}] {start_pin} ---> {next_pin}")
         
-        # Recurse if needed
+        # recurse to trace full path
         if next_pin and next_pin != "N/A":
             if not db_compare_arc(databases, next_pin, visited, depth + 1):
                 return False
@@ -122,13 +116,14 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
 
     return True
 
+def db_compare_all():
+
+    pass
+
 
 
 def attribute_retrieval(databases, start_pin, target_attribute):
-    """
-    Extracts raw data. Values are converted to float where possible.
-    Returns: { db_index: [ {related_pin, mode, value}, ... ] }
-    """
+    # Extracts raw data. Values are converted to float where possible. Returns: { db_index: [ {related_pin, mode, value}, ... ] }   
     raw_results = {}
     for idx, db in enumerate(databases):
         arcs = db.get(start_pin)
@@ -139,7 +134,7 @@ def attribute_retrieval(databases, start_pin, target_attribute):
         db_arcs = []
         for arc in arcs:
             val = arc.get(target_attribute, "N/A")
-            # Convert to float for math; use None for non-numeric data
+            # convert to float for math; use None for non-numeric data
             try:
                 num_val = float(val)
             except (ValueError, TypeError):
@@ -173,11 +168,8 @@ def attribute_print_pretty(data_map, start_pin, target_attribute):
 
 
 def attribute_spread(databases, start_pin, target_attribute):
-
-    #Fetch data using retrieval function
     data_map = attribute_retrieval(databases, start_pin, target_attribute)
     
-    #Extract valid numerical values for analysis
     numeric_values = [
         arc["value"] for arcs in data_map.values() 
         if arcs for arc in arcs if arc["value"] is not None
@@ -236,7 +228,7 @@ def main():
     print(f"Successfully loaded {len(all_dbs)} database(s).")
     ref_db = all_dbs[0]
 
-    # pin selection Logic - either select all pins (when --all) else just those mentioned with --arc option
+    # pin selectionl logic - either select all pins (when --all) else just those mentioned with --arc option
     target_pins = [] 
     if args.all:
         print("Mode: Tracing ALL pins from reference database.")

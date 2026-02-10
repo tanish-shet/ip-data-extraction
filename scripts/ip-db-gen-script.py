@@ -119,7 +119,7 @@ def parse_lib(input_file):
             mf = re_min_flag.search(raw_line)
             if mf: accumulator["min_delay_flag"] = mf.group(1).strip().lower()
 
-        # Table logic (fxn to log sigma values based on argument is still  to be added)
+        # table logic (fxn to log sigma values based on argument is still  to be added)
         sigma_match = re_sigma_type.search(raw_line)
         if sigma_match and pending_base_name:
             active_table_key = f"{pending_base_name}_{sigma_match.group(1).strip()}"
@@ -140,7 +140,7 @@ def parse_lib(input_file):
             accumulator[active_table_key] = extract_values(value_buffer.split(");", 1)[0])
             capturing_values, active_table_key, pending_base_name = False, None, None
 
-        # End of Timing Block processing
+        # end of Timing Block processing
         if bracket_depth == 0:
             in_timing = False
             t_type = accumulator.get("timing_type", "N/A")
@@ -213,11 +213,9 @@ def create_json_db_block(input_file):
             "seq_hold_fall": pin_data_buffer.get("seq_hold_fall")
         }
 
-        # if this is the first time we see the pin, create a list
+        # if this is the first time pin encounteres, create a list (of dictionaries)
         if pin_name not in database:
             database[pin_name] = []
-
-        # add the arc to the list (No overwriting!)
         database[pin_name].append(arc_entry)
 
     return database
