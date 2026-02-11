@@ -34,7 +34,7 @@ To dump out both database in json format and data logs in csv:
 ``` 
     python3 db-process.py <database directory path [ex: ../ip-data-extraction/extracted_data/db-dir/]> --option arguments
 ```
-### i) Comparing arcs across databases-
+### i) Comparing arcs across databases:
 ```
     python3 db-process.py <database directory path [ex: ../ip-data-extraction/extracted_data/db-dir/]> --compare --pins <list of pins to compare>
 ```
@@ -51,7 +51,7 @@ for comparing all pins across all databases, use:
     python3 db-process.py <database directory path [ex: ../ip-data-extraction/extracted_data/db-dir/]> --pins <target_pin> --arc <related_pin and mode that characterises an arc from target_pin> --get_attribute
 ```
 
-### iii) To get spread graph of a given attribute for an arc:
+### iii) To get histogram spread for a given attribute of an arc:
 ```
     python3 db-process.py <database directory path [ex: ../ip-data-extraction/extracted_data/db-dir/]> --pins <target_pin> --arc <related_pin and mode that characterises an arc from target_pin> --get_attribute --spread
 ```
