@@ -22,8 +22,7 @@ def load_database(db_folderpath):
             with open(filepath, 'r') as f:
                 all_databases.append(json.load(f))
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error: Skipping {filename} due to load error: {e}")
-                
+            print(f"Error: Skipping {filename} due to load error: {e}")                
     return all_databases
 
 def db_compare_arc(databases, start_pin, visited=None, depth=0):
@@ -113,17 +112,13 @@ def db_compare_arc(databases, start_pin, visited=None, depth=0):
                 return False
         else:
             print(f"{indent}    [RELATED_PIN] N/A")
-
     return True
 
 def db_compare_all():
 
     pass
 
-
-
-def attribute_retrieval(databases, start_pin, target_attribute):
-    # Extracts raw data. Values are converted to float where possible. Returns: { db_index: [ {related_pin, mode, value}, ... ] }   
+def attribute_retrieval(databases, start_pin, target_attribute, arc_pin=None, arc_mode=None):
     raw_results = {}
     for idx, db in enumerate(databases):
         arcs = db.get(start_pin)
@@ -132,19 +127,27 @@ def attribute_retrieval(databases, start_pin, target_attribute):
             continue
         
         db_arcs = []
-        for arc in arcs:
-            val = arc.get(target_attribute, "N/A")
-            # convert to float for math; use None for non-numeric data
+        for a in arcs:
+            if arc_pin and a.get("related_pin") != arc_pin:
+                continue
+            if arc_mode and a.get("mode") != arc_mode:
+                continue
+
+            val = a.get(target_attribute, "N/A")
             try:
                 num_val = float(val)
             except (ValueError, TypeError):
                 num_val = None
                 
             db_arcs.append({
-                "related_pin": arc.get("related_pin", "N/A"),
-                "mode": arc.get("mode", "N/A"),
+                "related_pin": a.get("related_pin", "N/A"),
+                "mode": a.get("mode", "N/A"),
                 "value": num_val
             })
+
+        if (arc_pin or arc_mode) and not db_arcs:
+            print(f"[!] Warning: Arc {{ {arc_pin} | {arc_mode} }} not found in DB {idx}")
+            
         raw_results[idx] = db_arcs
     return raw_results
 
@@ -167,8 +170,8 @@ def attribute_print_pretty(data_map, start_pin, target_attribute):
 
 
 
-def attribute_spread(databases, start_pin, target_attribute):
-    data_map = attribute_retrieval(databases, start_pin, target_attribute)
+def attribute_spread(databases, start_pin, target_attribute, arc_pin=None, arc_mode=None):
+    data_map = attribute_retrieval(databases, start_pin, target_attribute, arc_pin, arc_mode)
     
     numeric_values = [
         arc["value"] for arcs in data_map.values() 
@@ -178,7 +181,6 @@ def attribute_spread(databases, start_pin, target_attribute):
     if not numeric_values:
         print(f"[!] No valid numerical data found for '{target_attribute}' on pin '{start_pin}'.")
         return
-
     #Stats Calculation
     v_min, v_max = min(numeric_values), max(numeric_values)
     v_spread = v_max - v_min
@@ -204,44 +206,14 @@ def attribute_spread(databases, start_pin, target_attribute):
     plt.xlabel("Attribute Value")
     plt.ylabel("Frequency (Arc Occurrences)")
     plt.legend()
-    plt.grid(axis='y', alpha=0.3)
-    
+    plt.grid(axis='y', alpha=0.3)    
     plt.show()
 
-
-def main():
-    parser = argparse.ArgumentParser(description="Automated Timing Database Comparison Tool")
-    parser.add_argument("folderpath", help="Path to the directory containing JSON database files")
-    parser.add_argument("--compare", action="store_true", help="Enable structural path tracing")    
-    parser.add_argument("--pins", nargs="+", help="The starting pin(s) to begin the DFS traversal")    
-    parser.add_argument("--all", action="store_true", help="Process all parent pins from the reference DB")
-    parser.add_argument("--get_attribute", help=" to fetch values across PVTX db for a given attribue type")
-    parser.add_argument("--spread", action="store_true", help="Flag to trigger spread/histogram analysis")
-    args = parser.parse_args()
-
-    # load Data
-    all_dbs = load_database(args.folderpath)
-    if not all_dbs:
-        print("Error: No valid JSON databases found.")
-        sys.exit(1)
-
-    print(f"Successfully loaded {len(all_dbs)} database(s).")
-    ref_db = all_dbs[0]
-
-    # pin selectionl logic - either select all pins (when --all) else just those mentioned with --arc option
-    target_pins = [] 
-    if args.all:
-        print("Mode: Tracing ALL pins from reference database.")
-        target_pins = list(ref_db.keys())
-    elif args.pins:
-        target_pins = args.pins
-
-    # comparison of timing arc relations across DBs
-    if args.compare:
+#fxn to actually run the comparison across all DBs for the arcs of given input pins (input pins may be a pin list or single pin)  
+def run_comparison(all_dbs, target_pins):
         if not target_pins:
             print("Error: --compare requires either --pins or --all.")
             sys.exit(1)
-
         overall_trace_success = True
         global_visited = set()  # avoid re-tracing shared paths
             
@@ -266,19 +238,62 @@ def main():
         print("ALL PATHS CONSISTENT" if overall_trace_success else "STRUCTURAL MISMATCH DETECTED")
         print("="*50)
 
-    #spread analysis
-    elif args.spread:
-        if not args.pins or not args.get_attribute:
+#fxn to actually run the spread analysis, return plots
+def run_spread_analysis(all_dbs, pins, attribute, arc_pin=None, arc_mode=None):
+        if not pins or not attribute:
             sys.exit("Error: --spread requires --pin and --get_attribute.")
-        for p in args.pins:
-            attribute_spread(all_dbs, p, args.get_attribute)
-    
-    # attribute retrieval
-    elif args.pins and args.get_attribute:
-        for pin in args.pins:
-            results = attribute_retrieval(all_dbs, pin, args.get_attribute)
-            attribute_print_pretty(results, pin, args.get_attribute)
+        for p in pins:
+            attribute_spread(all_dbs, p, attribute, arc_pin, arc_mode)
 
+#fxn to actually retrieve the values for input attribute with --get_attribute argument
+def run_attribute_retrieval(all_dbs, pins, attribute, arc_pin=None, arc_mode=None):
+    for pin in pins:
+        results = attribute_retrieval(all_dbs, pin, attribute, arc_pin, arc_mode)
+        attribute_print_pretty(results, pin, attribute)
+
+#helper fxn to return target pins when --all argument used. ---> may need to be modified if 
+def get_target_pins(args, ref_db):
+    if args.all:
+        print("Mode: Tracing ALL pins from reference database.")
+        return list(ref_db.keys())
+    return args.pins or []
+
+def main():
+    parser = argparse.ArgumentParser(description="Automated Timing Database Comparison Tool")
+    parser.add_argument("folderpath", help="Path to the directory containing JSON database files")
+    parser.add_argument("--compare", action="store_true", help="Enable structural path tracing")    
+    parser.add_argument("--pins", nargs="+", help="The starting pin(s) to begin the DFS traversal")    
+    parser.add_argument("--all", action="store_true", help="Process all parent pins from the reference DB")
+    parser.add_argument("--get_attribute", help=" to fetch values across PVTX db for a given attribue type | Valid attributes : [pin, direction, related_pin, mode, setup_rise, setup_fall, hold_rise, hold_fall, comb_setup_rise, comb_setup_fall, comb_hold_rise, comb_hold_fall, seq_clk_arc, seq_setup_rise, seq_setup_fall, seq_hold_rise, seq_hold_fall]")
+    parser.add_argument("--spread", action="store_true", help="Flag to trigger spread/histogram analysis")
+    parser.add_argument("--arc", nargs="+", help = "Valid input  for this optional argument is the related_pin& mode for key-pin: passes the arc characterised by this key_pin-related_pin pair for attribute_retrieval")
+    args = parser.parse_args()
+    #vars for characterising an arc
+    arc_pin = args.arc[0] if args.arc else None
+    arc_mode = args.arc[1] if args.arc else None
+
+    all_dbs = load_database(args.folderpath)
+
+    if not all_dbs:
+        sys.exit("Error: No valid JSON databases found.")
+
+    print(f"Successfully loaded {len(all_dbs)} database(s).")
+
+    target_pins = get_target_pins(args, all_dbs[0]) #last argument (i.e. for DB) may be chose to represnet a reference DB
+
+    # argument handler
+    if args.compare:
+        run_comparison(all_dbs, target_pins)
+    
+    elif args.spread:
+        run_spread_analysis(all_dbs, args.pins, args.get_attribute, arc_pin, arc_mode)
+       
+    
+    elif args.pins and args.get_attribute:
+        run_attribute_retrieval(all_dbs, args.pins,args.get_attribute, arc_pin,arc_mode)
+  
+    
+    
 if __name__ == "__main__":
     main()
 

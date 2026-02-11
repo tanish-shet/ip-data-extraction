@@ -6,10 +6,9 @@ import sys
 import os
 import json
 
-# default output directory
-DEFAULT_DIR = "../extracted_data/pipecore-data"
-# scratch/ dummy output directory
 TEST_DIR = "../extracted_data/test-data"
+CSV_DIR = "../extracted_data/csv-logs/test-data"
+DB_DIR = "../extracted_data/db-dir/test-data"
 
 def read_directory_list_file(directory_list_file):
     # reads a file containing a list of directory paths.
@@ -287,8 +286,8 @@ def main():
         csv_log_name = filename.replace(".lib.gz", ".csv")
         json_db_name = filename.replace(".lib.gz", ".json")
 
-        output_csv_path = os.path.join(TEST_DIR, csv_log_name)
-        output_json_path = os.path.join(TEST_DIR, json_db_name)
+        output_csv_path = os.path.join(CSV_DIR, csv_log_name)
+        output_json_path = os.path.join(DB_DIR, json_db_name)
 
         print(f" Progress: [{idx}/{total_files}] analyzing {filename}...", end="\r")
 
